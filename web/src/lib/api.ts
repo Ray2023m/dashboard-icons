@@ -1,21 +1,10 @@
 import { METADATA_URL } from "@/constants"
-import type { IconFile, IconWithName } from "@/types/icons"
-
-/**
- * Custom error class for API errors
- */
-export class ApiError extends Error {
-	status: number
-
-	constructor(message: string, status = 500) {
-		super(message)
-		this.name = "ApiError"
-		this.status = status
-	}
-}
+import { ApiError } from "@/lib/errors"
+import type { AuthorData, IconFile, IconWithName } from "@/types/icons"
 
 /**
  * Fetches all icon data from the metadata.json file
+ * Uses fetch with revalidate for caching
  */
 export async function getAllIcons(): Promise<IconFile> {
 	try {
@@ -93,16 +82,14 @@ export async function getIconData(iconName: string): Promise<IconWithName | null
 }
 
 /**
- * Fetches author data from GitHub API
+ * Fetch author data from GitHub API (raw function without caching)
  */
-export async function getAuthorData(authorId: number) {
+async function fetchGitHubAuthorData(authorId: number) {
 	try {
 		const response = await fetch(`https://api.github.com/user/${authorId}`, {
 			headers: {
 				Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
-				"Cache-Control": "public, max-age=86400",
 			},
-			next: { revalidate: 86400 }, // Revalidate cache once a day
 		})
 
 		if (!response.ok) {
@@ -132,6 +119,70 @@ export async function getAuthorData(authorId: number) {
 			bio: null,
 		}
 	}
+}
+
+const authorDataCache: Record<string | number, AuthorData> = {}
+
+/**
+ * Build author data from internal (PocketBase) user metadata
+ * These users don't have GitHub profiles, so we construct a local AuthorData object
+ * - No html_url so the component won't render a link
+ * - Uses a generic avatar placeholder
+ */
+function buildInternalAuthorData(author: { id: string | number; name?: string; login?: string }): AuthorData {
+	return {
+		id: author.id,
+		name: author.name || "Community Contributor",
+		login: author.login || author.name || "contributor",
+		avatar_url: "", // Empty = will use fallback avatar in component
+		html_url: "", // Empty = no link will be rendered
+	}
+}
+
+/**
+ * Cached version of fetchAuthorData
+ * Supports both GitHub users (numeric IDs) and internal PocketBase users (string IDs)
+ *
+ * For GitHub users: fetches from GitHub API
+ * For internal users: constructs AuthorData from the embedded metadata
+ *
+ * This prevents hitting GitHub API rate limits by caching author data
+ * across multiple page builds and requests.
+ */
+export async function getAuthorData(authorId: number | string, authorMeta?: { name?: string; login?: string }): Promise<AuthorData> {
+	const cacheKey = String(authorId)
+
+	if (authorDataCache[cacheKey]) {
+		return authorDataCache[cacheKey]
+	}
+
+	let data: AuthorData
+
+	// If authorId is a numeric string, treat it as a GitHub user ID.
+	if (typeof authorId === "string" && /^\d+$/.test(authorId)) {
+		const ghId = Number(authorId)
+		data = await fetchGitHubAuthorData(ghId)
+
+		// If GitHub API fails (rate-limited, no token, etc.), fall back to authorMeta.login to still render a link.
+		if (authorMeta?.login && (data.login === "unknown" || !data.html_url)) {
+			data = {
+				...data,
+				login: authorMeta.login,
+				name: data.name || authorMeta.name || authorMeta.login,
+				html_url: `https://github.com/${authorMeta.login}`,
+				avatar_url: data.avatar_url || `https://github.com/${authorMeta.login}.png`,
+			}
+		}
+	} else if (typeof authorId === "string") {
+		// Non-numeric string => internal PocketBase user
+		data = buildInternalAuthorData({ id: authorId, ...authorMeta })
+	} else {
+		// Numeric ID = GitHub user
+		data = await fetchGitHubAuthorData(authorId)
+	}
+
+	authorDataCache[cacheKey] = data
+	return data
 }
 
 /**

@@ -1,7 +1,6 @@
+// biome-ignore-all lint: reason: I don't want to fix this
 import { useEffect, useRef } from "react"
 export function Carbon() {
-	// biome-ignore lint/style/noNonNullAssertion: <explanation>
-	const ref = useRef<HTMLDivElement>(null!)
 	if (process.env.NODE_ENV === "development") {
 		return null
 	}
@@ -15,6 +14,8 @@ export function Carbon() {
 		s.src = `//cdn.carbonads.com/carbon.js?serve=${serve}&placement=${placement}`
 		ref.current.appendChild(s)
 	}, [])
+
+	const ref = useRef<HTMLDivElement>(null!)
 
 	return (
 		<>

@@ -1,6 +1,8 @@
 export type IconAuthor = {
-	id: number
+	id: number | string
+	github_id?: string
 	name?: string
+	login?: string
 }
 
 export type IconUpdate = {
@@ -42,7 +44,7 @@ export type IconSearchProps = {
 }
 
 export type AuthorData = {
-	id: number
+	id: number | string
 	name?: string
 	login: string
 	avatar_url: string

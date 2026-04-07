@@ -1,5 +1,11 @@
 "use client"
 
+import { ArrowDownAZ, ArrowUpZA, Calendar, Filter, Search, SortAsc, X } from "lucide-react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useTheme } from "next-themes"
+import posthog from "posthog-js"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { AddToSearchBarButton } from "@/components/add-to-search-bar-button"
 import { VirtualizedIconsGrid } from "@/components/icon-grid"
 import { IconSubmissionContent } from "@/components/icon-submission-form"
 import { Badge } from "@/components/ui/badge"
@@ -17,14 +23,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
-import { type SortOption, filterAndSortIcons } from "@/lib/utils"
+import { filterAndSortIcons, normalizeForSearch, type SortOption } from "@/lib/utils"
 import type { IconSearchProps } from "@/types/icons"
-import { ArrowDownAZ, ArrowUpZA, Calendar, Filter, Search, SortAsc, X } from "lucide-react"
-import { useTheme } from "next-themes"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import posthog from "posthog-js"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
 
 export function IconSearch({ icons }: IconSearchProps) {
 	const searchParams = useSearchParams()
@@ -38,6 +38,7 @@ export function IconSearch({ icons }: IconSearchProps) {
 	const [selectedCategories, setSelectedCategories] = useState<string[]>(initialCategories ?? [])
 	const [sortOption, setSortOption] = useState<SortOption>(initialSort)
 	const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+	const noIconsFoundTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 	const { resolvedTheme } = useTheme()
 	const [isLazyRequestSubmitted, setIsLazyRequestSubmitted] = useState(false)
 
@@ -49,12 +50,12 @@ export function IconSearch({ icons }: IconSearchProps) {
 		return () => clearTimeout(timer)
 	}, [searchQuery])
 
-	// Extract all unique categories
+	// Extract all unique categories (normalized to lowercase)
 	const allCategories = useMemo(() => {
 		const categories = new Set<string>()
 		for (const icon of icons) {
 			for (const category of icon.data.categories) {
-				categories.add(category)
+				categories.add(category.toLowerCase())
 			}
 		}
 		return Array.from(categories).sort()
@@ -65,12 +66,18 @@ export function IconSearch({ icons }: IconSearchProps) {
 		if (!searchQuery.trim()) return {}
 
 		const q = searchQuery.toLowerCase()
+		const qNormalized = normalizeForSearch(searchQuery)
 		const matches: Record<string, string> = {}
 
 		for (const { name, data } of icons) {
-			// If name doesn't match but an alias does, store the first matching alias
-			if (!name.toLowerCase().includes(q)) {
-				const matchingAlias = data.aliases.find((alias) => alias.toLowerCase().includes(q))
+			const nameNormalized = normalizeForSearch(name)
+			// If name doesn't match (including normalized), but an alias does, store the first matching alias
+			if (!name.toLowerCase().includes(q) && !nameNormalized.includes(qNormalized)) {
+				const matchingAlias = data.aliases.find((alias) => {
+					const aliasLower = alias.toLowerCase()
+					const aliasNormalized = normalizeForSearch(alias)
+					return aliasLower.includes(q) || aliasNormalized.includes(qNormalized)
+				})
 				if (matchingAlias) {
 					matches[name] = matchingAlias
 				}
@@ -126,14 +133,15 @@ export function IconSearch({ icons }: IconSearchProps) {
 
 	const handleCategoryChange = useCallback(
 		(category: string) => {
+			const normalizedCategory = category.toLowerCase()
 			let newCategories: string[]
 
-			if (selectedCategories.includes(category)) {
-				// Remove the category if it's already selected
-				newCategories = selectedCategories.filter((c) => c !== category)
+			if (selectedCategories.some((c) => c.toLowerCase() === normalizedCategory)) {
+				// Remove the category if it's already selected (case-insensitive)
+				newCategories = selectedCategories.filter((c) => c.toLowerCase() !== normalizedCategory)
 			} else {
 				// Add the category if it's not selected
-				newCategories = [...selectedCategories, category]
+				newCategories = [...selectedCategories, normalizedCategory]
 			}
 
 			setSelectedCategories(newCategories)
@@ -162,19 +170,36 @@ export function IconSearch({ icons }: IconSearchProps) {
 			if (timeoutRef.current) {
 				clearTimeout(timeoutRef.current)
 			}
+			if (noIconsFoundTimeoutRef.current) {
+				clearTimeout(noIconsFoundTimeoutRef.current)
+			}
 		}
 	}, [])
 
 	useEffect(() => {
-		if (filteredIcons.length === 0 && searchQuery) {
-			console.log("no icons found", {
-				query: searchQuery,
-			})
-			posthog.capture("no icons found", {
-				query: searchQuery,
-			})
+		if (noIconsFoundTimeoutRef.current) {
+			clearTimeout(noIconsFoundTimeoutRef.current)
 		}
-	}, [filteredIcons, searchQuery])
+
+		if (filteredIcons.length === 0 && debouncedQuery.trim().length >= 2) {
+			noIconsFoundTimeoutRef.current = setTimeout(() => {
+				if (filteredIcons.length === 0 && debouncedQuery.trim().length >= 2) {
+					console.log("no icons found", {
+						query: debouncedQuery,
+					})
+					posthog.capture("no icons found", {
+						query: debouncedQuery,
+					})
+				}
+			}, 500)
+		}
+
+		return () => {
+			if (noIconsFoundTimeoutRef.current) {
+				clearTimeout(noIconsFoundTimeoutRef.current)
+			}
+		}
+	}, [filteredIcons, debouncedQuery])
 
 	if (!searchParams) return null
 
@@ -248,7 +273,7 @@ export function IconSearch({ icons }: IconSearchProps) {
 								{allCategories.map((category) => (
 									<DropdownMenuCheckboxItem
 										key={category}
-										checked={selectedCategories.includes(category)}
+										checked={selectedCategories.some((c) => c.toLowerCase() === category.toLowerCase())}
 										onCheckedChange={() => handleCategoryChange(category)}
 										className="cursor-pointer capitalize"
 									>
@@ -306,6 +331,8 @@ export function IconSearch({ icons }: IconSearchProps) {
 						</DropdownMenuContent>
 					</DropdownMenu>
 
+					<AddToSearchBarButton className="flex-1 sm:flex-none rounded-sm" />
+
 					{/* Clear all button */}
 					{(searchQuery || selectedCategories.length > 0 || sortOption !== "relevance") && (
 						<Button variant="outline" size="sm" onClick={clearFilters} className="flex-1 sm:flex-none cursor-pointer bg-background">
@@ -355,39 +382,18 @@ export function IconSearch({ icons }: IconSearchProps) {
 			{filteredIcons.length === 0 ? (
 				<div className="flex flex-col gap-8 py-12 px-2 w-full max-w-full sm:max-w-2xl mx-auto items-center overflow-x-hidden">
 					<div className="text-center w-full">
-						<h2 className="text-3xl sm:text-5xl font-semibold">Icon not found</h2>
-						<p className="text-lg text-muted-foreground mt-2">Help us expand our collection</p>
+						<h2 className="text-3xl sm:text-5xl font-semibold">404: Not Found</h2>
 					</div>
 					<div className="flex flex-col gap-4 items-center w-full">
+						{/** biome-ignore lint/correctness/useUniqueElementIds: I want the ID to be fixed */}
 						<div id="icon-submission-content" className="w-full">
 							<IconSubmissionContent />
-						</div>
-						<div className="mt-4 flex flex-col sm:flex-row items-center gap-2 justify-center w-full">
-							<span className="text-sm text-muted-foreground">Can't submit it yourself?</span>
-							<Button
-								className="cursor-pointer w-full sm:w-auto truncate whitespace-nowrap"
-								variant="outline"
-								size="sm"
-								onClick={() => {
-									setIsLazyRequestSubmitted(true)
-									toast("Request received!", {
-										description: `We've noted your request for "${searchQuery || "this icon"}". Thanks for your suggestion.`,
-									})
-									posthog.capture("lazy icon request", {
-										query: searchQuery,
-										categories: selectedCategories,
-									})
-								}}
-								disabled={isLazyRequestSubmitted}
-							>
-								Request this icon
-							</Button>
 						</div>
 					</div>
 				</div>
 			) : (
 				<>
-					<div className="flex justify-between items-center pb-2">
+					<div className="flex justify-between items-center">
 						<p className="text-sm text-muted-foreground">
 							Found {filteredIcons.length} icon
 							{filteredIcons.length !== 1 ? "s" : ""}.

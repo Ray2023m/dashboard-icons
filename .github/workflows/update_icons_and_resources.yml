@@ -1,11 +1,28 @@
 name: Update Icons and Resources
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Keep manual trigger
+    inputs:
+      force_retry_icon:
+        description: 'Icon name to force retry (without extension)'
+        required: false
+        type: string
+  workflow_run:
+    workflows: ["Add Icon to Collection"]
+    types:
+      - completed
+    branches:
+      - main
+
+concurrency:
+  group: update-icons-resources
+  cancel-in-progress: true
 
 jobs:
   convert_assets:
     runs-on: ubuntu-latest
+    # Only run if manually triggered OR if the add-icon workflow succeeded
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: write
     steps:
@@ -17,14 +34,21 @@ jobs:
       - name: Set Up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.13.7"
+          python-version: "3.14.0"
 
       - name: Install Dependencies
         run: |
-          pip install cairosvg pillow
+          pip install pillow
+          sudo apt-get update
+          sudo apt-get install -y inkscape
 
       - name: Run SVG to PNG and WEBP Conversion
-        run: python scripts/convert_svg_assets.py
+        run: |
+          if [ -n "${{ github.event.inputs.force_retry_icon }}" ]; then
+            python scripts/convert_svg_assets.py --force-retry "${{ github.event.inputs.force_retry_icon }}"
+          else
+            python scripts/convert_svg_assets.py
+          fi
 
       - name: Commit and Push Changes
         run: |
@@ -50,7 +74,7 @@ jobs:
       - name: Set Up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.13.7"
+          python-version: "3.14.0"
 
       - name: Commit and Push Changes
         run: |
@@ -75,7 +99,7 @@ jobs:
       - name: Set Up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.13.7"
+          python-version: "3.14.0"
 
       - name: Commit and Push Changes
         run: |

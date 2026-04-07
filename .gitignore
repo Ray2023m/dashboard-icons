@@ -33,3 +33,22 @@ Temporary Items
 
 # Python
 __pycache__/
+
+node_modules/
+.cursor/commands
+
+# GitHub Actions output artifacts (should never be committed)
+import_output_*.txt
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# Test environment (credentials)
+.env.test
+web/.env.test
+
+# Stray screenshots from testing
+*.png
+!svg/**/*.png
+!png/**/*.png
+!webp/**/*.webp

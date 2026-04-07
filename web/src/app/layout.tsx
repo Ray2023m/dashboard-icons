@@ -1,13 +1,14 @@
-import { PostHogProvider } from "@/components/PostHogProvider"
-import { Footer } from "@/components/footer"
-import { HeaderWrapper } from "@/components/header-wrapper"
-import { LicenseNotice } from "@/components/license-notice"
-import { BASE_URL, WEB_URL, getDescription, websiteTitle } from "@/constants"
-import { getTotalIcons } from "@/lib/api"
 import type { Metadata, Viewport } from "next"
 import { Inter } from "next/font/google"
 import { Toaster } from "sonner"
+import { Footer } from "@/components/footer"
+import { HeaderWrapper } from "@/components/header-wrapper"
+import { LicenseNotice } from "@/components/license-notice"
+import { PostHogProvider } from "@/components/PostHogProvider"
+import { BASE_URL, getDescription, WEB_URL, websiteTitle } from "@/constants"
+import { getTotalIcons } from "@/lib/api"
 import "./globals.css"
+import { Providers } from "@/components/providers"
 import { ThemeProvider } from "./theme-provider"
 
 const inter = Inter({
@@ -72,8 +73,9 @@ export async function generateMetadata(): Promise<Metadata> {
 		icons: {
 			icon: [
 				{ url: "/favicon.ico", sizes: "any" },
-				{ url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
-				{ url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+				{ url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" },
+				{ url: "/web-app-manifest-192x192.png", sizes: "192x192", type: "image/png" },
+				{ url: "/web-app-manifest-512x512.png", sizes: "512x512", type: "image/png" },
 			],
 			apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
 		},
@@ -85,15 +87,17 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 	return (
 		<html lang="en" suppressHydrationWarning>
 			<body className={`${inter.variable} antialiased bg-background flex flex-col min-h-screen`}>
-				<PostHogProvider>
-					<ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-						<HeaderWrapper />
-						<main className="flex-grow">{children}</main>
-						<Footer />
-						<Toaster />
-						<LicenseNotice />
-					</ThemeProvider>
-				</PostHogProvider>
+				<Providers>
+					<PostHogProvider>
+						<ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+							<HeaderWrapper />
+							<main className="flex-grow">{children}</main>
+							<Footer />
+							<Toaster />
+							<LicenseNotice />
+						</ThemeProvider>
+					</PostHogProvider>
+				</Providers>
 			</body>
 		</html>
 	)
